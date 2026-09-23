@@ -6,9 +6,9 @@ function openDB(){return new Promise((resolve,reject)=>{let r=indexedDB.open('le
 async function persist(){await put('vault',await seal({records,goals},key))}function lock(){key=null;sessionPassword=null;records=[];goals=[];$('app').classList.add('hidden');$('auth').classList.remove('hidden');$('password').value='';$('authTitle').textContent='Unlock Ledger';$('authMsg').textContent=''}
 async function unlock(){let p=$('password').value;if(p.length<8)throw Error('Password must have at least 8 characters');let config=await get('config');if(!config){let salt=crypto.getRandomValues(new Uint8Array(16));key=await derive(p,salt);await put('vault',await seal({records:[],goals:[]},key));await put('config',{salt:b64(salt)});}else{key=await derive(p,unb64(config.salt));let v=await unseal(await get('vault'),key);records=v.records;goals=v.goals}sessionPassword=p;$('auth').classList.add('hidden');$('app').classList.remove('hidden');$('password').value='';lastActivity=Date.now();render()}
 $('authBtn').onclick=async()=>{try{await unlock()}catch(e){key=null;$('authMsg').textContent='Could not unlock: '+e.message}};
-const today=()=>new Date().toLocaleDateString('en-CA');$('date').value=today();$('reportDate').value=today();function choices(){if(['saving','withdrawal'].includes($('kind').value)){$('currency').value='USD';$('currency').disabled=true}else $('currency').disabled=false;$('amountCurrency').textContent=$('currency').value;let opts='<option value="general">General savings</option>'+goals.map(g=>`<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('');$('saveGoal').innerHTML=opts;$('category').innerHTML=$('kind').value==='income'?'<option>Salary</option><option>Business</option><option>Gift</option><option>Other income</option>':$('kind').value==='expense'?'<option>Groceries</option><option>Transport</option><option>Food</option><option>Utilities</option><option>Health</option><option>Entertainment</option><option>Other</option>':opts;$('savePrompt').classList.toggle('hidden',$('kind').value!=='income'||$('currency').value!=='USD')}$('kind').onchange=choices;$('currency').onchange=()=>{$('amountCurrency').textContent=$('currency').value;choices()};
+const today=()=>new Date().toLocaleDateString('en-CA');$('date').value=today();$('reportDate').value=today();$('dashDate').value=today();function choices(){if(['saving','withdrawal'].includes($('kind').value)){$('currency').value='USD';$('currency').disabled=true}else $('currency').disabled=false;$('amountCurrency').textContent=$('currency').value;let opts='<option value="general">General savings</option>'+goals.map(g=>`<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('');$('saveGoal').innerHTML=opts;$('category').innerHTML=$('kind').value==='income'?'<option>Salary</option><option>Business</option><option>Gift</option><option>Other income</option>':$('kind').value==='expense'?'<option>Groceries</option><option>Transport</option><option>Food</option><option>Utilities</option><option>Health</option><option>Entertainment</option><option>Other</option>':opts;$('savePrompt').classList.toggle('hidden',$('kind').value!=='income'||$('currency').value!=='USD')}$('kind').onchange=choices;$('currency').onchange=()=>{$('amountCurrency').textContent=$('currency').value;choices()};
 function balance(c){return records.filter(r=>currency(r)===c).reduce((a,r)=>a+(r.kind==='income'?r.amount:r.kind==='expense'?-r.amount:r.kind==='saving'?-r.amount:r.kind==='withdrawal'?r.amount:0),0)}function saved(c){return records.filter(r=>currency(r)===c).reduce((a,r)=>a+(r.kind==='saving'?r.amount:r.kind==='withdrawal'?-r.amount:0),0)}
-function render(){choices();$('totals').innerHTML=['USD','ZiG'].map(c=>{let rs=records.filter(r=>currency(r)===c),sum=k=>rs.filter(r=>r.kind===k).reduce((a,r)=>a+r.amount,0);return `<div class="item"><h3>${c}</h3><p>Available: <b>${money(balance(c),c)}</b></p><p>Income: ${money(sum('income'),c)} · Expenses: ${money(sum('expense'),c)}</p><p>Savings: <b>${money(saved(c),c)}</b></p></div>`}).join('');$('goals').innerHTML=goals.map(g=>{let total=records.filter(r=>r.goal===g.id&&currency(r)==='USD').reduce((a,r)=>a+(r.kind==='saving'?r.amount:r.kind==='withdrawal'?-r.amount:0),0);return `<div class="item">${esc(g.name)}: ${money(total)} / ${money(g.target)} (${Math.round(100*total/g.target)}%)</div>`}).join('');$('history').innerHTML=records.slice().reverse().map(r=>`<div class="item"><b>${esc(r.kind)} · ${money(r.amount,currency(r))}</b><br>${esc(r.date)} · ${esc(r.description||r.category||'')} ${r.image?`<br><button data-image="${esc(r.id)}">View attachment</button>`:''}</div>`).join('');$('history').querySelectorAll('[data-image]').forEach(b=>b.onclick=()=>{let r=records.find(x=>x.id===b.dataset.image);let w=window.open('','_blank');if(w){w.document.write('<title>Ledger attachment</title><img style="max-width:100%" src="'+r.image+'">');w.document.close()}});report()}
+function render(){choices();$('totals').innerHTML=['USD','ZiG'].map(c=>{let rs=records.filter(r=>currency(r)===c),sum=k=>rs.filter(r=>r.kind===k).reduce((a,r)=>a+r.amount,0);return `<div class="item"><h3>${c}</h3><p>Available: <b>${money(balance(c),c)}</b></p><p>Income: ${money(sum('income'),c)} · Expenses: ${money(sum('expense'),c)}</p><p>Savings: <b>${money(saved(c),c)}</b></p></div>`}).join('');$('goals').innerHTML=goals.map(g=>{let total=records.filter(r=>r.goal===g.id&&currency(r)==='USD').reduce((a,r)=>a+(r.kind==='saving'?r.amount:r.kind==='withdrawal'?-r.amount:0),0);return `<div class="item">${esc(g.name)}: ${money(total)} / ${money(g.target)} (${Math.round(100*total/g.target)}%)</div>`}).join('');$('history').innerHTML=records.slice().reverse().map(r=>`<div class="item"><b>${esc(r.kind)} · ${money(r.amount,currency(r))}</b><br>${esc(r.date)} · ${esc(r.description||r.category||'')} ${r.image?`<br><button data-image="${esc(r.id)}">View attachment</button>`:''}</div>`).join('');$('history').querySelectorAll('[data-image]').forEach(b=>b.onclick=()=>{let r=records.find(x=>x.id===b.dataset.image);let w=window.open('','_blank');if(w){w.document.write('<title>Ledger attachment</title><img style="max-width:100%" src="'+r.image+'">');w.document.close()}});report();dashboard()}
 function report(){let d=new Date(($('reportDate').value||today())+'T12:00:00'),start=new Date(d),end=new Date(d),period=$('period').value;if(period==='week'){start.setDate(d.getDate()-(d.getDay()+6)%7);end=new Date(start);end.setDate(start.getDate()+6)}else if(period==='month'){start.setDate(1);end=new Date(d.getFullYear(),d.getMonth()+1,0)}else{start=new Date(d.getFullYear(),0,1);end=new Date(d.getFullYear(),11,31)}let iso=x=>x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');let rs=records.filter(r=>r.date>=iso(start)&&r.date<=iso(end));let sum=(k,c)=>rs.filter(r=>r.kind===k&&currency(r)===c).reduce((a,r)=>a+r.amount,0);$('report').textContent=`${iso(start)} to ${iso(end)} | `+['USD','ZiG'].map(c=>`${c}: Income ${money(sum('income',c),c)} | Expenses ${money(sum('expense',c),c)} | Net savings ${money(sum('saving',c)-sum('withdrawal',c),c)}`).join(' || ')}$('period').onchange=report;$('reportDate').onchange=report;
 $('photo').onchange=()=>{let f=$('photo').files[0];if(!f){$('preview').classList.add('hidden');return}let url=URL.createObjectURL(f);$('preview').src=url;$('preview').classList.remove('hidden')};
 function fileData(f){return new Promise((resolve,reject)=>{let r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=()=>reject(r.error);r.readAsDataURL(f)})}
@@ -34,3 +34,46 @@ $('applyOcr').onclick=()=>{
  if(lines.length&&!$('description').value)$('description').value=lines[0].slice(0,120);
  $('ocrStatus').textContent='Proposed details filled where clearly labelled. Check all fields, especially the TOTAL, before saving.';
 };
+
+// Ledger 4.0 dashboard and tab navigation; existing encrypted vault schema unchanged.
+const ledgerTabs=['dashboard','income','expenses','savings'];
+function showTab(tab){
+ if(!ledgerTabs.includes(tab))tab='dashboard';
+ document.querySelectorAll('[data-tab]').forEach(b=>{const active=b.dataset.tab===tab;b.classList.toggle('active',active);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});
+ ['dashboard','income','expenses','savings'].forEach(t=>{$(t+'Panel').hidden=t!==tab});
+ $('transactionPanel').hidden=tab==='dashboard'||tab==='savings';
+ $('goalsPanel').hidden=tab!=='savings';
+ $('reportsPanel').hidden=tab!=='dashboard';
+ $('historyPanel').hidden=tab==='dashboard';
+ $('settingsPanel').hidden=tab!=='dashboard';
+ if(tab==='income'||tab==='expenses'){
+  $('transactionHeading').textContent=tab==='income'?'New income':'New expense';
+  $('kind').value=tab==='income'?'income':'expense';choices();
+ }
+ if(tab==='savings'){
+  $('transactionPanel').hidden=false;$('transactionHeading').textContent='Savings deposit or withdrawal';
+  $('kind').value='saving';choices();
+ }
+ window.scrollTo(0,0);
+}
+document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>showTab(b.dataset.tab)));
+function dashboard(){
+ const chosen=$('dashDate').value||today(),d=new Date(chosen+'T12:00:00');if(Number.isNaN(d.getTime()))return;
+ const start=new Date(d),end=new Date(d),period=$('dashPeriod').value;
+ if(period==='week'){start.setDate(d.getDate()-(d.getDay()+6)%7);end.setTime(start.getTime());end.setDate(start.getDate()+6)}
+ else if(period==='month'){start.setDate(1);end.setTime(new Date(d.getFullYear(),d.getMonth()+1,0,12).getTime())}
+ else{start.setTime(new Date(d.getFullYear(),0,1,12).getTime());end.setTime(new Date(d.getFullYear(),11,31,12).getTime())}
+ const iso=x=>x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
+ const filtered=records.filter(r=>r.date>=iso(start)&&r.date<=iso(end));
+ $('dashRange').textContent=iso(start)+' to '+iso(end);
+ const tiles=[];
+ for(const c of ['USD','ZiG']){
+  const sum=k=>filtered.filter(r=>currency(r)===c&&r.kind===k).reduce((n,r)=>n+r.amount,0);
+  tiles.push(['Income · '+c,money(sum('income'),c)],['Expenses · '+c,money(sum('expense'),c)]);
+  if(c==='USD')tiles.push(['Net savings · USD',money(sum('saving')-sum('withdrawal'))]);
+ }
+ $('dashSummary').innerHTML=tiles.map(([label,value])=>'<div class="item"><small>'+esc(label)+'</small><strong>'+esc(value)+'</strong></div>').join('');
+ $('dashGoals').innerHTML=goals.length?goals.map(g=>{const amount=records.filter(r=>r.goal===g.id&&currency(r)==='USD').reduce((n,r)=>n+(r.kind==='saving'?r.amount:r.kind==='withdrawal'?-r.amount:0),0);return '<div class="item">'+esc(g.name)+': '+money(amount)+' / '+money(g.target)+' ('+Math.round(amount/g.target*100)+'%)</div>'}).join(''):'<p class="muted">No savings goals yet.</p>';
+ $('dashRecent').innerHTML=records.length?records.slice(-5).reverse().map(r=>'<div class="item"><b>'+esc(r.kind)+' · '+money(r.amount,currency(r))+'</b><br>'+esc(r.date)+' · '+esc(r.description||r.category||'')+'</div>').join(''):'<p class="muted">No transactions yet.</p>';
+}
+$('dashPeriod').onchange=dashboard;$('dashDate').onchange=dashboard;showTab('dashboard');
