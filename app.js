@@ -17,24 +17,54 @@ $('addGoal').onclick=async()=>{let name=$('goalName').value.trim(),target=cents(
 $('export').onclick=async()=>{try{let salt=crypto.getRandomValues(new Uint8Array(16)),k=await derive(sessionPassword,salt),blob=await seal({records,goals},k),payload={format:'ledger4-backup-v1',salt:b64(salt),...blob};let url=URL.createObjectURL(new Blob([JSON.stringify(payload)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='ledger4-backup-'+today()+'.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);$('backupMsg').textContent='Encrypted backup created. Keep the file and your password safe.'}catch(e){$('backupMsg').textContent=e.message}};
 $('restore').onchange=async()=>{try{let f=$('restore').files[0];if(!f)return;let data=JSON.parse(await f.text());if(data.format!=='ledger4-backup-v1')throw Error('Invalid backup format');let password=prompt('Enter the password used when this backup was created');if(!password)return;let k=await derive(password,unb64(data.salt)),v=await unseal(data,k);if(!Array.isArray(v.records)||!Array.isArray(v.goals))throw Error('Invalid backup data');if(!confirm('Replace all current records with this backup?'))return;records=v.records;goals=v.goals;await persist();render();$('backupMsg').textContent='Backup restored.'}catch(e){$('backupMsg').textContent='Restore failed: '+e.message}};$('lock').onclick=lock;['pointerdown','keydown'].forEach(e=>document.addEventListener(e,()=>lastActivity=Date.now()));setInterval(()=>{if(key&&Date.now()-lastActivity>Number($('timeout').value)*60000)lock()},10000);setInterval(()=>{if(key&&!localStorage.getItem('ledger4-backup-reminder')||key&&Date.now()-Number(localStorage.getItem('ledger4-backup-reminder'))>7*86400000){$('backupMsg').textContent='Reminder: export an encrypted backup this week.';localStorage.setItem('ledger4-backup-reminder',Date.now())}},60000);if('serviceWorker'in navigator)navigator.serviceWorker.register('./sw.js').catch(()=>{});choices();
 
-// Optional browser-native, on-device text recognition. No network requests or guessed values.
+// Offline OCR: bundled Tesseract.js assets; no upload and no changes to vault format.
+let ocrWorker=null, ocrBusy=false;
+async function offlineWorker(status){
+ if(ocrWorker)return ocrWorker;
+ if(!window.Tesseract)throw Error('Offline OCR library unavailable. You can still enter details manually.');
+ ocrWorker=await Tesseract.createWorker('eng',1,{
+  workerPath:'./worker.min.js',
+  corePath:'./tesseract-core-simd-lstm.wasm.js',
+  langPath:'.',gzip:true,
+  logger:m=>{if(m.status&&ocrBusy)status.textContent=m.status+(typeof m.progress==='number'?' '+Math.round(m.progress*100)+'%':'')}
+ });
+ return ocrWorker;
+}
 $('recognise').onclick=async()=>{
  const status=$('ocrStatus'),f=$('photo').files[0];
  if(!f){status.textContent='Select a receipt or screenshot first.';return}
- if(typeof TextDetector==='undefined'){status.textContent='Offline text recognition is not supported by this browser. Enter details manually; the image can still be attached.';return}
- status.textContent='Reading photo locally…';
- try{const bitmap=await createImageBitmap(f);try{const result=await new TextDetector().detect(bitmap);const text=result.map(x=>x.rawValue||'').join('\n');$('ocrText').value=text;$('ocrReview').classList.toggle('hidden',!text);status.textContent=text?'Text found. Review it carefully before applying.':'No readable text found. Enter details manually.'}finally{bitmap.close()}}catch(e){status.textContent='Could not read this image offline. Enter details manually.'}
+ if(ocrBusy)return;
+ ocrBusy=true;$('recognise').disabled=true;
+ status.textContent='Loading offline OCR engine…';
+ try{
+  const worker=await offlineWorker(status);
+  status.textContent='Reading image on this device…';
+  const result=await worker.recognize(f);
+  const text=result.data.text||'';
+  $('ocrText').value=text;
+  $('ocrReview').classList.toggle('hidden',!text.trim());
+  status.textContent=text.trim()?'Text found. Review it carefully before applying.':'No readable text found. Enter details manually.';
+ }catch(e){
+  if(ocrWorker){try{await ocrWorker.terminate()}catch(_){}ocrWorker=null}
+  status.textContent='Offline OCR could not read this image: '+(e?.message||String(e))+'. Manual entry is still available.';
+ }finally{ocrBusy=false;$('recognise').disabled=false}
 };
 $('applyOcr').onclick=()=>{
  const t=$('ocrText').value,lines=t.split(/\n/).map(x=>x.trim()).filter(Boolean);
- const explicit=t.match(/(?:USD|US\$|ZiG|ZWG|ZIG|\$)\s*([0-9][0-9,]*(?:\.[0-9]{2})?)/i);
- if(explicit){const cur=/zig|zwg/i.test(explicit[0])?'ZiG':'USD';$('currency').value=cur;choices();$('amount').value=explicit[1].replace(/,/g,'')}
+ // Prefer clearly labelled totals, never a random line item, tax or balance.
+ const amountPattern=/\b(?:grand\s+total|total\s+(?:paid|amount|due)|amount\s+paid|total)\s*[:=]?\s*(?:USD|US\$|ZiG|ZWG|ZIG|\$)?\s*([0-9][0-9,]*(?:[.,][0-9]{2})?)\b/ig;
+ let match,last=null;while((match=amountPattern.exec(t))!==null)last=match;
+ if(last){
+  const raw=last[1].replace(/,/g,''),n=Number(raw);
+  if(Number.isFinite(n)&&n>0)$('amount').value=raw;
+ }
+ const currencyMatch=t.match(/\b(?:ZiG|ZWG|USD|US\$)\b/i);
+ if(currencyMatch){$('currency').value=/zig|zwg/i.test(currencyMatch[0])?'ZiG':'USD';choices()}
  const d=t.match(/\b(20\d{2})[-\/](0?[1-9]|1[0-2])[-\/](0?[1-9]|[12]\d|3[01])\b/);
  if(d)$('date').value=d[1]+'-'+d[2].padStart(2,'0')+'-'+d[3].padStart(2,'0');
  if(lines.length&&!$('description').value)$('description').value=lines[0].slice(0,120);
- $('ocrStatus').textContent='Proposed details filled where clearly labelled. Check all fields, especially the TOTAL, before saving.';
+ $('ocrStatus').textContent='Proposed details are editable. Check the TOTAL, currency, date and description before saving.';
 };
-
 // Ledger 4.0 dashboard and tab navigation; existing encrypted vault schema unchanged.
 const ledgerTabs=['dashboard','income','expenses','savings'];
 function showTab(tab){
